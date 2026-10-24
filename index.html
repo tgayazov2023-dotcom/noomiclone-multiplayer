@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>NoomiClone — LAN Multiplayer Prototype</title>
+<style>
+:root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;background:#111827;color:#f9fafb;font:16px system-ui,-apple-system,sans-serif}main{max-width:760px;margin:auto;padding:18px}h1{font-size:1.35rem;margin:0 0 8px}p{color:#cbd5e1;line-height:1.45}.panel{background:#1f2937;border:1px solid #374151;border-radius:14px;padding:14px;margin:12px 0}.row{display:flex;gap:8px;flex-wrap:wrap}button,input{font:inherit;border-radius:10px;border:1px solid #4b5563;padding:12px}button{background:#2563eb;color:white;border:0;font-weight:650;cursor:pointer}button.secondary{background:#374151}input{background:#111827;color:white;min-width:0;flex:1;text-transform:uppercase}#room{font-size:1.6rem;letter-spacing:.12em;font-weight:800}#status{color:#a7f3d0;min-height:1.4em}canvas{display:block;width:100%;height:auto;background:#0b1220;border-radius:12px;touch-action:none}.controls{display:flex;justify-content:center;gap:16px;margin:12px 0}.controls button{width:76px;height:60px;font-size:1.4rem}.small{font-size:.85rem;color:#9ca3af}button:disabled{opacity:.5}
+</style>
+</head>
+<body><main>
+<h1>NoomiClone — мультиплеерный прототип</h1>
+<p>Мини-демо комнаты по коду для телефонов. Это отдельная тестовая сцена, не встроенный мод NoomiClone.</p>
+<div class="panel"><div class="row"><button id="hostBtn">Создать комнату</button><input id="codeInput" maxlength="8" placeholder="КОД КОМНАТЫ" aria-label="Код комнаты"><button id="joinBtn" class="secondary">Войти</button></div><p>Код комнаты: <span id="room">—</span></p><div id="status">Не подключено.</div><p class="small">Для установления соединения требуется интернет-соединение с сервисом PeerJS. После подключения игровой обмен идёт напрямую, если сеть это позволяет.</p></div>
+<div class="panel"><canvas id="game" width="720" height="420"></canvas><div class="controls"><button id="left" aria-label="Влево">←</button><button id="jump" class="secondary" aria-label="Прыжок">↑</button><button id="right" aria-label="Вправо">→</button></div><p class="small">Нажимай стрелки на экране или клавиши ← →. Прототип синхронизирует позиции простых персонажей.</p></div>
+</main>
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script>
+(() => {
+ const $=id=>document.getElementById(id), canvas=$('game'),ctx=canvas.getContext('2d');
+ let peer=null, conn=null, isHost=false, myId='', players={}, keys={left:false,right:false};
+ const colors=['#60a5fa','#f472b6','#34d399','#fbbf24'];
+ const status=t=>$('status').textContent=t;
+ const randCode=()=>Array.from({length:6},()=> 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[Math.floor(Math.random()*32)]).join('');
+ function makePlayer(id,color){return {id,x:Math.random()*540+80,y:330,color,vx:0,vy:0};}
+ function initPeer(id){
+   return new Promise((resolve,reject)=>{
+     try{peer=new Peer(id);peer.on('open',opened=>resolve(opened));peer.on('error',e=>{status('Ошибка: '+(e.type==='unavailable-id'?'код уже занят — создай новую комнату':e.type));reject(e)});peer.on('connection',c=>{if(!isHost){c.close();return;} conn=c;setupConn(c);});peer.on('disconnected',()=>status('Соединение с сервисом потеряно. Обнови страницу и попробуй снова.'));}
+     catch(e){reject(e)}
+   });
+ }
+ function setupConn(c){c.on('open',()=>{status('Друг подключился!');c.send({type:'welcome',players:Object.values(players)});});c.on('data',data=>{if(data.type==='state'){const p=players[data.player.id];if(p){p.x=data.player.x;p.y=data.player.y;p.color=data.player.color;}else players[data.player.id]=data.player;}});c.on('close',()=>status('Друг отключился.'));c.on('error',()=>status('Ошибка соединения.'));}
+ $('hostBtn').onclick=async()=>{cleanup();isHost=true;myId=randCode();players={};players[myId]=makePlayer(myId,colors[0]);$('room').textContent=myId;$('codeInput').value=myId;status('Создаём комнату…');try{await initPeer(myId);status('Комната готова. Отправь код другу.');}catch(e){$('room').textContent='—';}};
+ $('joinBtn').onclick=async()=>{const code=$('codeInput').value.trim().toUpperCase();if(!/^[A-Z0-9]{5,8}$/.test(code)){status('Введи код комнаты из 5–8 букв или цифр.');return;}cleanup();isHost=false;myId='G'+randCode();players={};players[myId]=makePlayer(myId,colors[1]);status('Подключаемся…');try{await initPeer(myId);conn=peer.connect(code,{reliable:true});conn.on('open',()=>{ $('room').textContent=code;status('Подключено к комнате '+code);conn.send({type:'state',player:players[myId]});});conn.on('data',data=>{if(data.type==='welcome'){data.players.forEach(p=>{if(p.id!==myId)players[p.id]=p;});}});conn.on('error',()=>status('Не удалось подключиться. Проверь код и попробуй снова.'));conn.on('close',()=>status('Связь с хостом закрыта.'));}catch(e){status('Не удалось подключиться. Попробуй ещё раз.');}};
+ function cleanup(){if(conn){try{conn.close()}catch(e){}conn=null;}if(peer){try{peer.destroy()}catch(e){}peer=null;}players={};$('room').textContent='—';}
+ function sendState(){if(conn&&conn.open)conn.send({type:'state',player:players[myId]});}
+ function move(dx){const p=players[myId];if(!p)return;p.x=Math.max(20,Math.min(700,p.x+dx));sendState();}
+ $('left').onpointerdown=()=>keys.left=true;$('left').onpointerup=$('left').onpointercancel=()=>keys.left=false;
+ $('right').onpointerdown=()=>keys.right=true;$('right').onpointerup=$('right').onpointercancel=()=>keys.right=false;
+ $('jump').onclick=()=>{const p=players[myId];if(p&&p.y>=329){p.vy=-12;sendState();}};
+ window.addEventListener('keydown',e=>{if(e.key==='ArrowLeft')keys.left=true;if(e.key==='ArrowRight')keys.right=true;if(e.key==='ArrowUp')$('jump').click();});window.addEventListener('keyup',e=>{if(e.key==='ArrowLeft')keys.left=false;if(e.key==='ArrowRight')keys.right=false;});
+ function drawPlayer(p){ctx.strokeStyle=p.color;ctx.fillStyle=p.color;ctx.lineWidth=6;ctx.lineCap='round';ctx.beginPath();ctx.arc(p.x,p.y-42,12,0,Math.PI*2);ctx.fill();ctx.beginPath();ctx.moveTo(p.x,p.y-29);ctx.lineTo(p.x,p.y+4);ctx.moveTo(p.x,p.y-17);ctx.lineTo(p.x-15,p.y-4);ctx.moveTo(p.x,p.y-17);ctx.lineTo(p.x+15,p.y-4);ctx.moveTo(p.x,p.y+4);ctx.lineTo(p.x-12,p.y+25);ctx.moveTo(p.x,p.y+4);ctx.lineTo(p.x+12,p.y+25);ctx.stroke();ctx.fillStyle='#e5e7eb';ctx.font='12px system-ui';ctx.textAlign='center';ctx.fillText(p.id===myId?'Ты':p.id,p.x,p.y+43);}
+ function frame(){ctx.clearRect(0,0,720,420);ctx.fillStyle='#111827';ctx.fillRect(0,0,720,420);ctx.strokeStyle='#334155';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(0,360);ctx.lineTo(720,360);ctx.stroke();ctx.fillStyle='#1e293b';for(let x=0;x<720;x+=40)ctx.fillRect(x,365,24,4);
+ const p=players[myId];if(p){if(keys.left)move(-3);if(keys.right)move(3);p.vy=(p.vy||0)+0.6;p.y+=p.vy;if(p.y>330){p.y=330;p.vy=0;}if(isHost&&conn&&conn.open)conn.send({type:'welcome',players:Object.values(players)});}
+ Object.values(players).forEach(drawPlayer);requestAnimationFrame(frame);}
+ // Guests receive host updates using the same welcome packet.
+ const oldSetup=setupConn;setupConn=function(c){oldSetup(c);c.on('data',data=>{if(data.type==='welcome'){data.players.forEach(p=>{if(p.id!==myId)players[p.id]=p;});}});};
+ frame();
+})();
+</script></body></html>
