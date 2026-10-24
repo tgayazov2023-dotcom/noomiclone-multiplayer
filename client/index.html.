@@ -1,0 +1,104 @@
+
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>NoomiClone Multiplayer Test</title>
+<style>
+body{margin:0;padding:16px;background:#101827;color:white;font:16px system-ui}
+main{max-width:600px;margin:auto}
+section{background:#1a2638;padding:14px;border-radius:14px;margin:12px 0}
+input,button{box-sizing:border-box;padding:12px;border-radius:9px;border:1px solid #52647a;background:#0f1928;color:white;font-size:16px}
+input{width:100%;margin:6px 0}
+button{background:#176c9b;margin:4px}
+canvas{width:100%;background:#b8e5fa;border-radius:10px;touch-action:none}
+.controls{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.controls button{font-size:24px;padding:15px}
+#status{overflow-wrap:anywhere;color:#b8d7ee}
+</style>
+</head>
+<body><main>
+<h2>NoomiClone — тест мультиплеера</h2>
+<p>Прототип для проверки соединения двух телефонов.</p>
+<section>
+<label>Имя игрока</label>
+<input id="name" placeholder="Игрок">
+<label>WebSocket-адрес сервера</label>
+<input id="server" placeholder="wss://адрес-твоего-сервера">
+<button onclick="connect('create')">Создать комнату</button>
+<input id="room" placeholder="Код комнаты">
+<button onclick="connect('join')">Войти в комнату</button>
+<p id="status">Сначала запусти сервер и введи его адрес.</p>
+</section>
+<section>
+<h3>Комната: <span id="code">—</span></h3>
+<canvas id="game" width="600" height="300"></canvas>
+<div id="players"></div>
+<div class="controls">
+<span></span><button onclick="move(0,-1)">▲</button><span></span>
+<button onclick="move(-1,0)">◀</button>
+<button onclick="move(0,1)">▼</button>
+<button onclick="move(1,0)">▶</button>
+</div>
+</section>
+</main>
+<script>
+let ws=null,myId=null,room='',x=0,y=0,angle=0;
+let players={};
+const $=id=>document.getElementById(id);
+function say(s){$('status').textContent=s}
+function send(o){if(ws&&ws.readyState===1)ws.send(JSON.stringify(o))}
+function connect(action){
+ let url=$('server').value.trim();
+ if(!/^wss?:\/\//i.test(url)){say('Сначала нужен адрес запущенного WebSocket-сервера.');return}
+ try{ws=new WebSocket(url)}catch(e){say('Неверный адрес сервера.');return}
+ say('Подключаемся к серверу…');
+ ws.onopen=()=>send({type:action,name:$('name').value||'Игрок',room:$('room').value.trim().toUpperCase()});
+ ws.onmessage=e=>{
+  let m;try{m=JSON.parse(e.data)}catch{return}
+  if(m.type==='hello')myId=m.id;
+  if(m.type==='error')say(m.message);
+  if(m.type==='joined'){
+   myId=m.id;room=m.room;$('code').textContent=room;$('room').value=room;
+   players={};m.players.forEach(p=>players[p.id]=p);
+   say('Подключено! Код комнаты: '+room);renderNames();
+  }
+  if(m.type==='players'){players={};m.players.forEach(p=>players[p.id]=p);renderNames()}
+  if(m.type==='player-moved'){players[m.player.id]=m.player;renderNames()}
+  if(m.type==='player-left'){delete players[m.id];renderNames()}
+ };
+ ws.onclose=()=>say('Соединение закрыто. Проверь сервер.');
+ ws.onerror=()=>say('Ошибка соединения. Проверь адрес сервера.');
+}
+function move(dx,dy){
+ x=Math.max(-1,Math.min(1,x+dx*.1));
+ y=Math.max(-1,Math.min(1,y+dy*.1));
+ if(dx||dy)angle=Math.atan2(dy,dx);
+ send({type:'move',x,y,angle});
+ if(players[myId])Object.assign(players[myId],{x,y,angle});
+ draw();
+}
+function renderNames(){
+ $('players').textContent=Object.values(players).map(p=>p.name+(p.id===myId?' (ты)':'')).join(' · ');
+ draw();
+}
+function draw(){
+ const c=$('game'),g=c.getContext('2d');
+ g.clearRect(0,0,c.width,c.height);
+ Object.values(players).forEach((p,i)=>{
+  let px=(p.x+1)*c.width/2,py=(p.y+1)*c.height/2;
+  g.strokeStyle=p.color||['#e99b00','#008acb','#dd4770'][i%3];
+  g.fillStyle=g.strokeStyle;g.lineWidth=6;g.lineCap='round';
+  g.beginPath();g.arc(px,py-18,9,0,Math.PI*2);g.fill();
+  g.beginPath();g.moveTo(px,py-9);g.lineTo(px,py+14);
+  g.moveTo(px,py);g.lineTo(px-12,py+8);
+  g.moveTo(px,py);g.lineTo(px+12,py+8);
+  g.moveTo(px,py+14);g.lineTo(px-9,py+27);
+  g.moveTo(px,py+14);g.lineTo(px+9,py+27);g.stroke();
+  g.fillStyle='#172b3a';g.font='14px sans-serif';g.textAlign='center';g.fillText(p.name,px,py+44);
+ });
+}
+draw();
+</script>
+</body></html>
